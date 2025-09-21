@@ -1,0 +1,5 @@
+data/
+cookies.txt
+.venv/
+__pycache__/
+wp.env
