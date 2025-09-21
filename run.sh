@@ -42,7 +42,10 @@ main() {
 
     mkdir -p "$DATA_DIR"
 
-    python3 "$REPO_ROOT/download_playlist.py" "$PLAYLIST_URL"
+    for attempt in 1 2 3; do
+        echo "[download] Attempt $attempt/3"
+        python3 "$REPO_ROOT/download_playlist.py" "$PLAYLIST_URL"
+    done
 
     if [[ ! -d "$DATA_DIR" ]]; then
         echo "Data directory not found at $DATA_DIR." >&2
