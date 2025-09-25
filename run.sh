@@ -4,9 +4,45 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$REPO_ROOT/.venv"
-ENV_FILE="$REPO_ROOT/wp.env"
+PRIMARY_ENV_FILE="$REPO_ROOT/.env"
+FALLBACK_ENV_FILE="$REPO_ROOT/wp.env"
+if [[ -f "$PRIMARY_ENV_FILE" ]]; then
+    ENV_FILE="$PRIMARY_ENV_FILE"
+elif [[ -f "$FALLBACK_ENV_FILE" ]]; then
+    ENV_FILE="$FALLBACK_ENV_FILE"
+else
+    ENV_FILE="$PRIMARY_ENV_FILE"
+fi
 DATA_DIR="$REPO_ROOT/data"
-REMOTE_PATH="u2961-etg8zonmhuba@ssh.kaalaawatharanaa2.sg-host.com:/home/u2961-etg8zonmhuba/www/kaalaawatharanaa2.sg-host.com/public_html/wp-content/uploads/2025/youtube2wordpress"
+SKIP_DOWNLOAD=false
+
+usage() {
+    cat <<USAGE
+Usage: ${0##*/} [--skip-download]
+
+Options:
+  --skip-download  Skip running download_playlist.py and reuse existing data.
+  -h, --help       Show this help message and exit.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-download)
+            SKIP_DOWNLOAD=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
 
 require_file() {
     local path="$1"
@@ -28,24 +64,32 @@ main() {
     cd "$REPO_ROOT"
 
     require_file "$VENV_DIR/bin/activate" "Virtual environment not found at $VENV_DIR. Run setup.sh first."
-    require_file "$ENV_FILE" "Missing WordPress credentials file at $ENV_FILE."
-    require_command scp
+    require_file "$ENV_FILE" "Missing environment file at $ENV_FILE."
 
     # shellcheck disable=SC1090
     source "$VENV_DIR/bin/activate"
 
-    read -rp "Enter YouTube playlist URL: " PLAYLIST_URL
-    if [[ -z "${PLAYLIST_URL// }" ]]; then
-        echo "Playlist URL cannot be empty." >&2
-        exit 1
-    fi
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
 
     mkdir -p "$DATA_DIR"
 
-    for attempt in 1 2 3; do
-        echo "[download] Attempt $attempt/3"
-        python3 "$REPO_ROOT/download_playlist.py" "$PLAYLIST_URL"
-    done
+    if [[ "$SKIP_DOWNLOAD" == false ]]; then
+        read -rp "Enter YouTube playlist URL: " PLAYLIST_URL
+        if [[ -z "${PLAYLIST_URL// }" ]]; then
+            echo "Playlist URL cannot be empty." >&2
+            exit 1
+        fi
+
+        for attempt in 1 2 3; do
+            echo "[download] Attempt $attempt/3"
+            python3 "$REPO_ROOT/download_playlist.py" "$PLAYLIST_URL"
+        done
+    else
+        echo "Skipping download step (existing data will be used)."
+    fi
 
     if [[ ! -d "$DATA_DIR" ]]; then
         echo "Data directory not found at $DATA_DIR." >&2
@@ -71,12 +115,12 @@ main() {
         exit 1
     fi
 
-    scp -P 18765 -r "${files[@]}" "$REMOTE_PATH"
+    python3 "$REPO_ROOT/upload_to_r2.py" "$TARGET_DIR"
     shopt -u nullglob
 
     popd >/dev/null
 
-    python3 "$REPO_ROOT/create_posts.py"
+    python3 "$REPO_ROOT/create_posts.py" --env-file "$ENV_FILE"
 }
 
 main "$@"

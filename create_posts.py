@@ -30,8 +30,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--env-file",
         type=Path,
-        default=Path("wp.env"),
-        help="Path to the env file with WordPress credentials (default: wp.env)",
+        default=Path(".env"),
+        help="Path to the env file with WordPress credentials (default: .env; falls back to wp.env if missing)",
     )
     parser.add_argument(
         "--uploads-path",
@@ -245,9 +245,14 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     try:
         load_env_file(args.env_file)
-    except FileNotFoundError as err:
-        print(str(err), file=sys.stderr)
-        sys.exit(1)
+    except FileNotFoundError:
+        # Backward-compat fallback to wp.env when --env-file not found
+        fallback = Path("wp.env")
+        if fallback.exists():
+            load_env_file(fallback)
+        else:
+            print(f"Env file not found: {args.env_file}", file=sys.stderr)
+            sys.exit(1)
 
     site = os.getenv("WP_BASE_URL", "").strip()
     username = os.getenv("WP_USERNAME", "").strip()
@@ -274,7 +279,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         print("No metadata files found to process.")
         return
 
-    media_base = build_media_base(site, args.uploads_path)
+    uploads_path = os.getenv("WP_UPLOADS_PATH", "").strip() or args.uploads_path
+    media_base_override = os.getenv("MEDIA_BASE_URL", "").strip()
+    if media_base_override:
+        media_base = ensure_trailing_slash(media_base_override.rstrip("/"))
+    else:
+        media_base = build_media_base(site, uploads_path)
 
     with requests.Session() as session:
         session.auth = HTTPBasicAuth(username, app_password)
